@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Interaktif Malaysia - Gaya Google Maps Normal</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        gmap: {
+                            land: '#f8f9fa',
+                            water: '#aad3df',
+                            border: '#d1d5db',
+                            road: '#ffffff'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- MediaPipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+        }
+        .state-path {
+            stroke: #ffffff;
+            stroke-width: 1.5;
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+            filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.15));
+        }
+        .state-path:hover {
+            filter: drop-shadow(0px 0px 10px rgba(37,99,235,0.8)) brightness(1.1);
+            stroke-width: 2.5;
+            stroke: #ffffff;
+        }
+        
+        /* State Colors matching the reference image */
+        #MY-09 { fill: #38bdf8; } /* Perlis - Light Blue */
+        #MY-02 { fill: #ec4899; } /* Kedah - Pink/Magenta */
+        #MY-07 { fill: #f59e0b; } /* Penang - Orange Yellow */
+        #MY-08 { fill: #f97316; } /* Perak - Orange */
+        #MY-03 { fill: #7c3aed; } /* Kelantan - Deep Purple */
+        #MY-11 { fill: #22c55e; } /* Terengganu - Green */
+        #MY-06 { fill: #ef4444; } /* Pahang - Red */
+        #MY-10 { fill: #3b82f6; } /* Selangor - Blue */
+        #MY-05 { fill: #10b981; } /* Negeri Sembilan - Light Green */
+        #MY-04 { fill: #a855f7; } /* Melaka - Purple */
+        #MY-01 { fill: #f59e0b; } /* Johor - Golden Orange */
+        #MY-13 { fill: #8b5cf6; } /* Sarawak - Purple */
+        #MY-12 { fill: #06b6d4; } /* Sabah - Cyan/Blue */
+
+        /* Active Selected State Highlight */
+        .state-path.active {
+            stroke: #ffffff !important;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 12px rgba(0,0,0,0.5)) brightness(1.2) !important;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="h-16 glass-panel border-b border-slate-200 px-6 flex items-center justify-between z-30 shrink-0 sticky top-0">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-md text-white">
+                <i class="fa-solid fa-map-location-dot text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg tracking-wide text-slate-900">Peta Malaysia Biasa & Interaktif</h1>
+                <p class="text-xs text-slate-500">Terokai Negeri, Banjaran & Tanih dengan Paparan Peta Standard</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <button id="toggle-camera-btn" onclick="toggleGestureControl()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition shadow-md flex items-center space-x-2">
+                <i class="fa-solid fa-camera"></i>
+                <span id="cam-btn-text">Buka Kamera AI</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        
+        <!-- Left Container: Interactive Map & Camera View PIP -->
+        <div class="flex-1 flex flex-col p-4 lg:p-6 overflow-y-auto space-y-4 relative">
+            
+            <!-- Camera Picture-in-Picture Floating Panel -->
+            <div id="camera-container" class="absolute top-8 right-8 w-52 h-44 glass-panel rounded-2xl overflow-hidden border border-blue-500/40 shadow-xl z-40 hidden flex flex-col">
+                <div class="bg-slate-50 px-2 py-1.5 flex items-center justify-between text-[11px] text-blue-700 font-semibold border-b border-slate-200">
+                    <span class="flex items-center space-x-1"><i class="fa-solid fa-video animate-pulse"></i><span>Kamera AI (MediaPipe Hands)</span></span>
+                    <button onclick="toggleGestureControl()" class="text-slate-500 hover:text-slate-800"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
+                    <video id="webcam" class="absolute inset-0 w-full h-full object-cover transform -scale-x-100" autoplay playsinline muted></video>
+                    <canvas id="output_canvas" class="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100"></canvas>
+                    <div id="gesture-status" class="absolute bottom-1.5 px-2.5 py-0.5 rounded-md bg-white/95 text-[10px] font-medium text-emerald-600 border border-emerald-200 flex items-center space-x-1.5 shadow-sm">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span id="gesture-text">Menunggu Tangan...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Virtual Hand Cursor on screen when camera active -->
+            <div id="hand-cursor" class="fixed w-8 h-8 rounded-full bg-blue-500/30 border-2 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] pointer-events-none z-50 hidden transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-all duration-75">
+                <div id="cursor-dot" class="w-3 h-3 rounded-full bg-blue-600 shadow-sm"></div>
+            </div>
+
+            <!-- Gesture Instructions Ribbon -->
+            <div id="gesture-guide" class="hidden glass-panel px-4 py-2.5 rounded-xl border border-blue-200 bg-blue-50/50 flex flex-wrap items-center justify-between text-xs animate-fadeIn">
+                <div class="flex items-center space-x-2 text-blue-800 font-medium">
+                    <i class="fa-solid fa-hand text-blue-600 animate-bounce"></i>
+                    <span>Panduan Gerakan AI:</span>
+                </div>
+                <div class="flex items-center space-x-4 text-[11px] text-slate-700">
+                    <span id="badge-point" class="gesture-badge px-2 py-1 rounded bg-white border border-slate-200 flex items-center space-x-1.5">
+                        <i class="fa-solid fa-hand-point-up text-blue-600"></i>
+                        <span><strong>Tunjuk Jari:</strong> Gerak Kursor</span>
+                    </span>
+                    <span id="badge-pinch" class="gesture-badge px-2 py-1 rounded bg-white border border-slate-200 flex items-center space-x-1.5">
+                        <i class="fa-solid fa-hand-pinch text-emerald-600"></i>
+                        <span><strong>Cantum (Pinch):</strong> Pilih Negeri</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Quick Select Buttons -->
+            <div class="glass-panel p-3.5 rounded-2xl flex flex-wrap gap-2 items-center justify-between">
+                <span class="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center space-x-1.5">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Pilih Negeri Cepat:</span>
+                </span>
+                <div id="state-buttons-container" class="flex flex-wrap gap-1.5">
+                    <!-- Dynamic state buttons -->
+                </div>
+            </div>
+
+            <!-- Clean Map Container -->
+            <div class="glass-panel p-4 rounded-2xl flex-1 flex flex-col items-center justify-center relative min-h-[420px] border border-slate-200 bg-white shadow-sm">
+                <div class="absolute top-3 left-4 flex items-center space-x-2 text-xs text-slate-500 font-medium">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                    <span>Peta Malaysia Standard</span>
+                </div>
+
+                <!-- Simplified standard vector SVG of Malaysia -->
+                <svg id="malaysia-map" viewBox="0 0 1000 460" class="w-full h-auto max-h-[380px] select-none">
+                    <g id="peninsular" transform="translate(15, 5)">
+                        <path id="MY-09" data-code="perlis" class="state-path" d="M 120 40 L 138 34 L 145 52 L 128 60 L 120 40 Z"><title>Perlis</title></path>
+                        <path id="MY-02" data-code="kedah" class="state-path" d="M 120 40 L 145 52 L 170 42 L 180 78 L 152 98 L 125 76 L 120 40 Z"><title>Kedah</title></path>
+                        <path id="MY-07" data-code="penang" class="state-path" d="M 112 76 L 125 76 L 122 90 L 110 86 Z"><title>Pulau Pinang</title></path>
+                        <path id="MY-08" data-code="perak" class="state-path" d="M 125 76 L 152 98 L 180 78 L 205 115 L 182 170 L 138 142 L 125 76 Z"><title>Perak</title></path>
+                        <path id="MY-03" data-code="kelantan" class="state-path" d="M 180 78 L 225 62 L 240 115 L 205 140 L 205 115 Z"><title>Kelantan</title></path>
+                        <path id="MY-11" data-code="terengganu" class="state-path" d="M 225 62 L 265 92 L 260 150 L 240 115 Z"><title>Terengganu</title></path>
+                        <path id="MY-06" data-code="pahang" class="state-path" d="M 205 140 L 240 115 L 260 150 L 278 195 L 215 220 L 182 170 Z"><title>Pahang</title></path>
+                        <path id="MY-10" data-code="selangor" class="state-path" d="M 138 142 L 182 170 L 172 200 L 150 190 Z"><title>Selangor & W.P. Kuala Lumpur</title></path>
+                        <path id="MY-05" data-code="negeri_sembilan" class="state-path" d="M 172 200 L 215 220 L 202 236 L 178 215 Z"><title>Negeri Sembilan</title></path>
+                        <path id="MY-04" data-code="melaka" class="state-path" d="M 178 215 L 202 236 L 194 250 L 172 228 Z"><title>Melaka</title></path>
+                        <path id="MY-01" data-code="johor" class="state-path" d="M 202 236 L 215 220 L 278 195 L 292 248 L 240 278 L 202 236 Z"><title>Johor</title></path>
+                    </g>
+
+                    <text x="430" y="155" fill="#94a3b8" font-size="14" font-weight="600" letter-spacing="3">LAUT CHINA SELATAN</text>
+
+                    <g id="east-malaysia" transform="translate(145, 5)">
+                        <path id="MY-13" data-code="sarawak" class="state-path" d="M 400 285 L 462 212 L 535 202 L 625 152 L 645 178 L 562 225 L 482 305 L 420 315 Z"><title>Sarawak</title></path>
+                        <path id="MY-12" data-code="sabah" class="state-path" d="M 625 152 L 675 92 L 735 102 L 755 142 L 695 188 L 645 178 Z"><title>Sabah</title></path>
+                    </g>
+                </svg>
+
+                <p class="text-[11px] text-slate-400 mt-2 text-center">Peta standard bersih dengan tona warna klasik negeri.</p>
+            </div>
+        </div>
+
+        <aside class="w-full lg:w-[460px] glass-panel border-t lg:border-t-0 lg:border-l border-slate-200 flex flex-col z-20 shrink-0 h-auto shadow-xl">
+            
+            <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-white/80">
+                <div class="flex items-center space-x-3">
+                    <div id="header-icon-box" class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                        <i id="state-icon" class="fa-solid fa-mountain-sun text-lg"></i>
+                    </div>
+                    <div>
+                        <span id="state-region-tag" class="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Sila Pilih Negeri</span>
+                        <h2 id="state-title" class="font-bold text-lg text-slate-900">Maklumat Geografi</h2>
+                    </div>
+                </div>
+                <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">Geografi T1</span>
+            </div>
+
+            <div id="state-detail-content" class="p-5 flex-1 overflow-y-auto space-y-4 text-sm text-slate-700">
+                <div class="text-center py-12 px-4 space-y-4">
+                    <div class="w-20 h-20 mx-auto rounded-full bg-white border border-slate-200 flex items-center justify-center text-blue-600 shadow-md">
+                        <i class="fa-solid fa-map-marked-alt text-3xl animate-bounce"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 text-base">Terokai Geografi Negeri Malaysia</h3>
+                    <p class="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                        Klik mana-mana negeri atau aktifkan <strong>Kamera AI</strong> untuk meneroka Banjaran, Tanih, dan Maklumat Fizikal Bab 6.
+                    </p>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <script>
+        const malaysiaGeoData = {
+            perlis: {
+                name: "Perlis Indera Kayangan",
+                region: "Semenanjung Malaysia (Utara)",
+                icon: "fa-wheat-awn",
+                image: "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Batu Kapur Gua Kelam & Dataran Aluvium Perlis",
+                banjaran: ["Banjaran Nakawan (Sempadan Malaysia-Thailand)", "Bukit Keteri & Gua Kelam (Bukit Batu Kapur)"],
+                tanih: ["Tanih Aluvium (Kawasan Dataran)", "Tanih Renggam / Batu Kapur (Kawasan Bukit)"],
+                pertanian: ["Padi Bukit & Padi Sawah", "Mangga Harum Manis", "Tebu"],
+                ciriFizikal: "Mempunyai dataran tanah pamah yang rata serta dibentuk oleh batu kapur unik di Banjaran Nakawan."
+            },
+            kedah: {
+                name: "Kedah Darul Aman",
+                region: "Semenanjung Malaysia (Utara)",
+                icon: "fa-seedling",
+                image: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Dataran Kedah - Jelapang Padi Negara & Gunung Jerai",
+                banjaran: ["Gunung Jerai (1,217 m - Gunung Terpencil)", "Banjaran Kedah-Singgora", "Banjaran Titiwangsa (Sempadan Timur)"],
+                tanih: ["Tanih Aluvium Subur (Lembangan Sungai & Dataran)", "Tanih Latirit (Kawasan Bukit)"],
+                pertanian: ["Padi Sawah (Jelapang Padi Utama Malaysia)", "Getah", "Kelapa Sawit"],
+                ciriFizikal: "Dataran Kedah-Perlis merupakan tanah pamah aluvium yang paling luas di Malaysia untuk penanaman padi."
+            },
+            penang: {
+                name: "Pulau Pinang",
+                region: "Semenanjung Malaysia (Utara)",
+                icon: "fa-bridge",
+                image: "https://images.unsplash.com/photo-1584286595398-a59f21d313f5?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Bukit Bendera & Pinggir Laut Pulau Pinang",
+                banjaran: ["Bukit Bendera (833 m)", "Bukit Penara"],
+                tanih: ["Tanih Berpasir & Aluvium (Pesisir Pantai)", "Tanih Granit / Latirit (Kawasan Bukit)"],
+                pertanian: ["Padi Sawah (Seberang Perai)", "Perniagaan & Pelancongan (Bukit Bendera)"],
+                ciriFizikal: "Terdiri daripada pulau dan Seberang Perai di tanah besar. Dikelilingi pinggir laut yang penting untuk pelabuhan & pelancongan."
+            },
+            perak: {
+                name: "Perak Darul Ridzuan",
+                region: "Semenanjung Malaysia (Utara)",
+                icon: "fa-mountain-sun",
+                image: "https://images.unsplash.com/photo-1609949279531-cf48d64bed89?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Banjaran Titiwangsa (Gunung Korbu) & Lembangan Sg. Perak",
+                banjaran: ["Banjaran Titiwangsa (Gunung Korbu - 2,182 m)", "Banjaran Bintang", "Banjaran Keledang"],
+                tanih: ["Tanih Latirit (Kawasan Tanah Tinggi)", "Tanih Aluvium (Lembangan Sg. Perak & Kerian)"],
+                pertanian: ["Kelapa Sawit", "Padi Sawah (Sg. Manik & Kerian)", "Teh (Tanah Tinggi)"],
+                ciriFizikal: "Mempunyai puncak gunung lipat tua yang tinggi di Banjaran Titiwangsa serta lembangan sungai yang panjang (Sungai Perak)."
+            },
+            kelantan: {
+                name: "Kelantan Darul Naim",
+                region: "Semenanjung Malaysia (Pantai Timur)",
+                icon: "fa-water",
+                image: "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Dataran Kelantan & Lembangan Sg. Kelantan",
+                banjaran: ["Banjaran Titiwangsa (Sempadan Barat)", "Banjaran Utama", "Gunung Stong (1,422 m)"],
+                tanih: ["Tanih Aluvium Subur (Delta & Dataran Kelantan)", "Tanih Latirit (Pedalaman)"],
+                pertanian: ["Padi Sawah (Dataran Kelantan)", "Tembakau", "Kelapa Sawit", "Getah"],
+                ciriFizikal: "Dataran Kelantan dibentuk oleh enapan tanih aluvium yang subur dari Sungai Kelantan."
+            },
+            terengganu: {
+                name: "Terengganu Darul Iman",
+                region: "Semenanjung Malaysia (Pantai Timur)",
+                icon: "fa-umbrella-beach",
+                image: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Pentas Benua, Pantai Berpasir & Tasik Kenyir",
+                banjaran: ["Banjaran Pantai Timur (Gunung Tebu - 1,039 m)", "Gunung Padang"],
+                tanih: ["Tanih BRIS / Berpasir (Pesisir Pantai)", "Tanih Latirit (Kawasan Bukit & Pedalaman)"],
+                pertanian: ["Kelapa Sawit", "Buah-buahan Pantai", "Perikanan & Gas Asli"],
+                ciriFizikal: "Garis pantai berpasir yang panjang, kaya dengan tanih BRIS serta kawasan tadahan air terbesar (Tasik Kenyir)."
+            },
+            pahang: {
+                name: "Pahang Darul Makmur",
+                region: "Semenanjung Malaysia (Pantai Timur)",
+                icon: "fa-mountain",
+                image: "https://images.unsplash.com/photo-1511497584788-876761465087?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Gunung Tahan (Banjaran Tahan) & Cameron Highlands",
+                banjaran: ["Banjaran Tahan (Gunung Tahan - 2,187 m, Gunung Tertinggi Semenanjung)", "Banjaran Titiwangsa", "Banjaran Benom"],
+                tanih: ["Tanih Latirit / Renggam (Kawasan Tanah Tinggi)", "Tanih Aluvium (Lembangan Sg. Pahang)"],
+                pertanian: ["Teh, Sayur & Bunga Hawa Sederhana (Cameron Highlands)", "Kelapa Sawit", "Getah"],
+                ciriFizikal: "Mempunyai kemuncak tertinggi di Semenanjung Malaysia (Gunung Tahan) serta sungai terpanjang di Semenanjung (Sungai Pahang)."
+            },
+            selangor: {
+                name: "Selangor & W.P. Kuala Lumpur / Putrajaya",
+                region: "Semenanjung Malaysia (Tengah)",
+                icon: "fa-city",
+                image: "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Dataran Klang & Banjaran Titiwangsa Sisi Barat",
+                banjaran: ["Banjaran Titiwangsa (Genting Highlands / Bukit Nuang - 1,493 m)"],
+                tanih: ["Tanih Aluvium & Gambut (Lembah Klang & Kuala Langat)", "Tanih Latirit (Kawasan Bukit)"],
+                pertanian: ["Kelapa Sawit", "Padi Sawah (Sektor Tanjung Karang)", "Buah-buahan"],
+                ciriFizikal: "Kawasan tanah pamah yang amat pesat dengan perindustrian dan petempatan padat di Lembah Klang."
+            },
+            negeri_sembilan: {
+                name: "Negeri Sembilan Darul Khusus",
+                region: "Semenanjung Malaysia (Selatan)",
+                icon: "fa-tree-city",
+                image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Penghujung Selatan Banjaran Titiwangsa & Gunung Telapak Burok",
+                banjaran: ["Banjaran Titiwangsa (Penghujung Selatan - Gunung Besar Hantu 1,462 m)", "Gunung Telapak Burok"],
+                tanih: ["Tanih Latirit (Batu Kawi/Granit)", "Tanih Aluvium (Dataran Pantai Port Dickson)"],
+                pertanian: ["Getah", "Kelapa Sawit", "Buah-buahan Dusun"],
+                ciriFizikal: "Merupakan bahagian penghujung selatan Banjaran Titiwangsa di mana bentuk tanah tinggi bertukar menjadi beralun."
+            },
+            melaka: {
+                name: "Melaka Negeri Bersejarah",
+                region: "Semenanjung Malaysia (Selatan)",
+                icon: "fa-anchor",
+                image: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Tanah Pamah Beralun & Pinggir Laut Selat Melaka",
+                banjaran: ["Bukit Ledang (Sempadan Johor-Melaka)", "Gunung Tampin (Penghujung Banjaran Titiwangsa)"],
+                tanih: ["Tanih Latirit (Kawasan Tanah Beralun)", "Tanih Aluvium Pantai (Pesisir Laut)"],
+                pertanian: ["Kelapa Sawit", "Getah", "Padi Sawah (Kawasan Terhad)"],
+                ciriFizikal: "Bentuk muka bumi tanah pamah beralun dan pinggir laut yang strategik di sepanjang Selat Melaka."
+            },
+            johor: {
+                name: "Johor Darul Ta'zim",
+                region: "Semenanjung Malaysia (Selatan)",
+                icon: "fa-tree",
+                image: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Gunung Ledang & Tanih Gambut / Latirit Johor",
+                banjaran: ["Gunung Ledang (1,276 m - Gunung Terpencil)", "Gunung Pulai", "Gunung Belumut (1,010 m)"],
+                tanih: ["Tanih Latirit (Kawasan Beralun)", "Tanih Gambut & Aluvium (Pontian, Batu Pahat & Muar)"],
+                pertanian: ["Kelapa Sawit (Pengeluar Utama)", "Nanas (Tanih Gambut Pontian)", "Getah"],
+                ciriFizikal: "Tanah pamah beralun yang luas. Tanih gambut di Johor Barat sangat sesuai untuk tanaman nanas."
+            },
+            sabah: {
+                name: "Sabah Negeri Di Bawah Bayu",
+                region: "Malaysia Timur (Borneo)",
+                icon: "fa-volcano",
+                image: "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Gunung Kinabalu (Banjaran Crocker) & Lembah Danum",
+                banjaran: ["Banjaran Crocker (Gunung Kinabalu - 4,095 m, Gunung Tertinggi Malaysia)", "Banjaran Trus Madi (Gunung Trus Madi - 2,642 m)", "Banjaran Brassey"],
+                tanih: ["Tanih Volkanik / Latirit (Kawasan Tawau & Dataran Beralun)", "Tanih Aluvium (Dataran Keningau & Dataran Pantai)"],
+                pertanian: ["Kelapa Sawit (Kawasan Tawau & Lahad Datu)", "Teh & Sayuran (Kundasang)", "Koko"],
+                ciriFizikal: "Mempunyai kemuncak tertinggi di Malaysia (Gunung Kinabalu) dan struktur fizikal bergunung-ganang lipat muda yang dramatik."
+            },
+            sarawak: {
+                name: "Sarawak Bumi Kenyalang",
+                region: "Malaysia Timur (Borneo)",
+                icon: "fa-river",
+                image: "https://images.unsplash.com/photo-1511497584788-876761465087?auto=format&fit=crop&w=800&q=80",
+                imageCaption: "Taman Negara Gunung Mulu & Sungai Rajang Sarawak",
+                banjaran: ["Banjaran Tama Abu (Gunung Murud - 2,423 m, Puncak Tertinggi Sarawak)", "Pergunungan Iran", "Pergunungan Hose", "Banjaran Kapuas Hulu", "Gunung Mulu (Batu Kapur)"],
+                tanih: ["Tanih Gambut (Kawasan Delta Rajang & Mukah)", "Tanih Latirit (Pedalaman)", "Tanih Aluvium Subur"],
+                pertanian: ["Lada Hitam (Pengeluar Utama)", "Kelapa Sawit", "Sagu (Tanih Gambut)"],
+                ciriFizikal: "Mempunyai sungai terpanjang di Malaysia (Sungai Rajang) serta bentuk gua batu kapur terbesar di dunia (Taman Negara Mulu)."
+            }
+        };
+
+        let cameraActive = false;
+        let hands = null;
+        let camera = null;
+        let isPinchedState = false;
+        let cursorSmoothX = window.innerWidth / 2;
+        let cursorSmoothY = window.innerHeight / 2;
+
+        function initApp() {
+            renderStateButtons();
+            setupSVGMapEvents();
+            selectState('kedah');
+        }
+
+        function renderStateButtons() {
+            const container = document.getElementById('state-buttons-container');
+            container.innerHTML = '';
+            Object.keys(malaysiaGeoData).forEach(code => {
+                const state = malaysiaGeoData[code];
+                const btn = document.createElement('button');
+                btn.id = `btn-${code}`;
+                btn.className = `px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-slate-700 transition duration-150 flex items-center space-x-1 shadow-sm`;
+                btn.onclick = () => selectState(code);
+                btn.innerHTML = `<span>${state.name.split(' ')[0]}</span>`;
+                container.appendChild(btn);
+            });
+        }
+
+        function setupSVGMapEvents() {
+            const paths = document.querySelectorAll('.state-path');
+            paths.forEach(path => {
+                path.addEventListener('click', function() {
+                    const code = this.getAttribute('data-code');
+                    if (code && malaysiaGeoData[code]) selectState(code);
+                });
+            });
+        }
+
+        function selectState(code) {
+            const data = malaysiaGeoData[code];
+            if (!data) return;
+
+            document.querySelectorAll('.state-path').forEach(p => {
+                if (p.getAttribute('data-code') === code) p.classList.add('active');
+                else p.classList.remove('active');
+            });
+
+            Object.keys(malaysiaGeoData).forEach(c => {
+                const btn = document.getElementById(`btn-${c}`);
+                if (btn) {
+                    if (c === code) {
+                        btn.className = `px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white border border-blue-500 shadow-sm transition duration-150`;
+                    } else {
+                        btn.className = `px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-slate-700 transition duration-150 shadow-sm`;
+                    }
+                }
+            });
+
+            updateSidePanel(data);
+        }
+
+        function updateSidePanel(data) {
+            document.getElementById('state-title').innerText = data.name;
+            document.getElementById('state-region-tag').innerText = data.region;
+            document.getElementById('state-icon').className = `fa-solid ${data.icon} text-lg`;
+
+            const banjaranList = data.banjaran.map(item => `<li class="flex items-start space-x-2"><i class="fa-solid fa-mountain text-blue-600 text-xs mt-1"></i><span>${item}</span></li>`).join('');
+            const tanihList = data.tanih.map(item => `<li class="flex items-start space-x-2"><i class="fa-solid fa-layer-group text-emerald-600 text-xs mt-1"></i><span>${item}</span></li>`).join('');
+            const taniList = data.pertanian.map(item => `<span class="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px] text-blue-700 font-medium">${item}</span>`).join(' ');
+
+            const contentHTML = `
+                <div class="space-y-4 animate-fadeIn">
+                    <div class="relative rounded-xl overflow-hidden border border-slate-200 shadow-md group">
+                        <img src="${data.image}" alt="${data.name}" class="w-full h-44 object-cover group-hover:scale-105 transition duration-500" onerror="this.src='https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=800&q=80';">
+                        <div class="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/10 to-transparent"></div>
+                        <div class="absolute bottom-2.5 left-3 right-3 text-xs text-white">
+                            <i class="fa-solid fa-camera text-blue-400 mr-1.5"></i>
+                            <span class="font-medium">${data.imageCaption}</span>
+                        </div>
+                    </div>
+
+                    <div class="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-2">
+                        <h4 class="font-bold text-blue-700 text-xs uppercase tracking-wider flex items-center space-x-2">
+                            <i class="fa-solid fa-mountain-sun text-blue-600"></i>
+                            <span>Banjaran & Gunung Utama</span>
+                        </h4>
+                        <ul class="space-y-1.5 text-xs text-slate-700">${banjaranList}</ul>
+                    </div>
+
+                    <div class="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-2">
+                        <h4 class="font-bold text-emerald-700 text-xs uppercase tracking-wider flex items-center space-x-2">
+                            <i class="fa-solid fa-earth-asia text-emerald-600"></i>
+                            <span>Jenis Tanih Utama</span>
+                        </h4>
+                        <ul class="space-y-1.5 text-xs text-slate-700">${tanihList}</ul>
+                    </div>
+
+                    <div class="p-3.5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-2">
+                        <h4 class="font-bold text-blue-700 text-xs uppercase tracking-wider flex items-center space-x-2">
+                            <i class="fa-solid fa-circle-info text-blue-600"></i>
+                            <span>Ciri Fizikal & Ringkasan Geografi</span>
+                        </h4>
+                        <p class="text-xs text-slate-700 leading-relaxed">${data.ciriFizikal}</p>
+                        <div class="pt-2 border-t border-slate-100">
+                            <span class="text-[11px] font-semibold text-slate-500 block mb-1">Hasil & Tanaman Utama:</span>
+                            <div class="flex flex-wrap gap-1">${taniList}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('state-detail-content').innerHTML = contentHTML;
+        }
+
+        function toggleGestureControl() {
+            cameraActive = !cameraActive;
+            const container = document.getElementById('camera-container');
+            const cursor = document.getElementById('hand-cursor');
+            const guide = document.getElementById('gesture-guide');
+            const btnText = document.getElementById('cam-btn-text');
+            const btn = document.getElementById('toggle-camera-btn');
+
+            if (cameraActive) {
+                container.classList.remove('hidden');
+                cursor.classList.remove('hidden');
+                guide.classList.remove('hidden');
+                btnText.innerText = "Tutup Kamera AI";
+                btn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 text-white transition shadow-md flex items-center space-x-2";
+                initMediaPipe();
+            } else {
+                container.classList.add('hidden');
+                cursor.classList.add('hidden');
+                guide.classList.add('hidden');
+                btnText.innerText = "Buka Kamera AI";
+                btn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition shadow-md flex items-center space-x-2";
+                if (camera) {
+                    camera.stop();
+                }
+            }
+        }
+
+        function initMediaPipe() {
+            const videoElement = document.getElementById('webcam');
+            const canvasElement = document.getElementById('output_canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+
+            canvasElement.width = 320;
+            canvasElement.height = 240;
+
+            hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.65,
+                minTrackingConfidence: 0.65
+            });
+
+            hands.onResults(onHandResults);
+
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    if (cameraActive) {
+                        await hands.send({ image: videoElement });
+                    }
+                },
+                width: 320,
+                height: 240
+            });
+            camera.start();
+        }
+
+        function onHandResults(results) {
+            const canvasElement = document.getElementById('output_canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            const cursor = document.getElementById('hand-cursor');
+            const cursorDot = document.getElementById('cursor-dot');
+            const gestureText = document.getElementById('gesture-text');
+            const badgePoint = document.getElementById('badge-point');
+            const badgePinch = document.getElementById('badge-pinch');
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#2563eb', lineWidth: 2 });
+                drawLandmarks(canvasCtx, landmarks, { color: '#dc2626', lineWidth: 1, radius: 3 });
+
+                const indexFinger = landmarks[8];
+                const thumbTip = landmarks[4];
+
+                const targetX = indexFinger.x * window.innerWidth;
+                const targetY = indexFinger.y * window.innerHeight;
+
+                cursorSmoothX += (targetX - cursorSmoothX) * 0.35;
+                cursorSmoothY += (targetY - cursorSmoothY) * 0.35;
+
+                cursor.style.left = `${cursorSmoothX}px`;
+                cursor.style.top = `${cursorSmoothY}px`;
+
+                const distance = Math.hypot(indexFinger.x - thumbTip.x, indexFinger.y - thumbTip.y);
+                
+                if (distance < 0.065) {
+                    if (!isPinchedState) {
+                        isPinchedState = true;
+                        cursor.className = "fixed w-10 h-10 rounded-full bg-emerald-500/40 border-2 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.6)] pointer-events-none z-50 flex items-center justify-center transition-all duration-75";
+                        cursorDot.className = "w-5 h-5 rounded-full bg-emerald-600 shadow-md scale-110";
+                        
+                        badgePinch.className = "gesture-badge px-2 py-1 rounded bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center space-x-1.5 shadow-sm scale-105";
+                        badgePoint.className = "gesture-badge px-2 py-1 rounded bg-white border border-slate-200 opacity-60 flex items-center space-x-1.5";
+                        
+                        gestureText.innerText = "Pinch Berjaya! Memilih Negeri...";
+
+                        const element = document.elementFromPoint(cursorSmoothX, cursorSmoothY);
+                        if (element) {
+                            const statePath = element.closest('.state-path');
+                            if (statePath) {
+                                const code = statePath.getAttribute('data-code');
+                                if (code) selectState(code);
+                            }
+                        }
+                    }
+                } else {
+                    if (isPinchedState) {
+                        isPinchedState = false;
+                        cursor.className = "fixed w-8 h-8 rounded-full bg-blue-500/30 border-2 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] pointer-events-none z-50 flex items-center justify-center transition-all duration-75";
+                        cursorDot.className = "w-3 h-3 rounded-full bg-blue-600 shadow-sm";
+
+                        badgePinch.className = "gesture-badge px-2 py-1 rounded bg-white border border-slate-200 text-slate-700 flex items-center space-x-1.5";
+                        badgePoint.className = "gesture-badge px-2 py-1 rounded bg-blue-50 border border-blue-200 text-blue-800 flex items-center space-x-1.5 scale-105";
+                    }
+                    gestureText.innerText = "Tangan Dikesan (Aktif Menunjuk)";
+                }
+            } else {
+                gestureText.innerText = "Menunggu Tangan...";
+                badgePoint.className = "gesture-badge px-2 py-1 rounded bg-white border border-slate-200 text-slate-700 flex items-center space-x-1.5";
+                badgePinch.className = "gesture-badge px-2 py-1 rounded bg-white border border-slate-200 text-slate-700 flex items-center space-x-1.5";
+            }
+            canvasCtx.restore();
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
